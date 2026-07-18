@@ -1,0 +1,37 @@
+name: Weekly yt-dlp Update and Test
+
+on:
+  schedule:
+    # Runs at 00:00 UTC every Sunday
+    - cron: '0 0 * * 0'
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+
+jobs:
+  update-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Upgrade yt-dlp to latest version
+        run: |
+          pip install -U yt-dlp
+
+      - name: Run smoke test extraction
+        run: |
+          echo "Current yt-dlp version:"
+          python -m yt_dlp --version
+          echo "Testing extraction on a public video..."
+          python -m yt_dlp -g "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
