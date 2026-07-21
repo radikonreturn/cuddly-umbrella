@@ -96,7 +96,16 @@ def test_download_video_success(mock_send, mock_extract):
     # Mock httpx response stream
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.aiter_bytes.return_value = [b"chunk1", b"chunk2"]
+    
+    async def mock_aiter_bytes(*args, **kwargs):
+        yield b"chunk1"
+        yield b"chunk2"
+    mock_resp.aiter_bytes = mock_aiter_bytes
+    
+    async def mock_aclose(*args, **kwargs):
+        pass
+    mock_resp.aclose = mock_aclose
+    
     mock_send.return_value = mock_resp
     
     # Test request

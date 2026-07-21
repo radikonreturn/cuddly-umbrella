@@ -156,3 +156,6 @@ Thumbs.db
 # IDE configurations
 .vscode/
 .idea/
+
+# Flutter mobile lib exclusion
+!mobile/cuddle_umbrella/lib/
