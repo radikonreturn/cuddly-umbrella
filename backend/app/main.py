@@ -53,7 +53,7 @@ app.add_middleware(
 )
 
 # User-Agent Verification Dependency for Mobile App Client
-async def verify_mobile_user_agent(user_agent: str = Header(None)):
+async def verify_mobile_user_agent(user_agent: Optional[str] = Header(None)):
     """
     Enforces access control by verifying that the request originates from the mobile app client.
     Can be bypassed in local development using the DISABLE_UA_CHECK environment variable.
@@ -238,7 +238,7 @@ async def download_video(
     request: Request,
     url: str = Query(..., description="The URL of the video"),
     format_id: str = Query(..., description="The selected format ID to download"),
-    user_agent: str = Depends(verify_mobile_user_agent)
+    user_agent: Optional[str] = Depends(verify_mobile_user_agent)
 ):
     validate_video_url(url)
 
@@ -249,6 +249,12 @@ async def download_video(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Video bilgisi alınamadı: {str(e)}"
+        )
+
+    if not info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Video bilgileri çözümlenemedi."
         )
 
     # Find the requested format
@@ -287,17 +293,34 @@ async def download_video(
     encoded_filename = urllib.parse.quote(filename)
     content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
 
-    # Asynchronous generator to stream bytes while guaranteeing connection closure
+    # Open connection and verify status code before streaming
+    timeout = httpx.Timeout(10.0, connect=30.0, read=300.0)
+    client = httpx.AsyncClient(timeout=timeout)
+    try:
+        req = client.build_request("GET", video_url, headers=download_headers)
+        resp = await client.send(req, stream=True)
+        if resp.status_code >= 400:
+            await resp.aclose()
+            await client.aclose()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Kaynak video sunucusu hata döndürdü: {resp.status_code}"
+            )
+    except Exception as e:
+        await client.aclose()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Video akışı başlatılamadı: {str(e)}"
+        )
+
     async def stream_generator():
-        # Establish timeout bounds
-        timeout = httpx.Timeout(10.0, connect=30.0, read=300.0)
-        client = httpx.AsyncClient(timeout=timeout)
         try:
-            async with client.stream("GET", video_url, headers=download_headers) as r:
-                r.raise_for_status()
-                async for chunk in r.aiter_bytes(chunk_size=65536):
-                    yield chunk
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                yield chunk
         finally:
+            await resp.aclose()
             await client.aclose()
 
     response_headers = {
