@@ -6,10 +6,15 @@ import '../models/video_info.dart';
 import '../models/library_item.dart';
 import '../services/api_service.dart';
 import '../services/download_service.dart';
+import 'settings_provider.dart';
 
 // Services
-final apiServiceProvider = Provider<ApiService>((ref) => ApiService());
+final apiServiceProvider = Provider<ApiService>((ref) {
+  final backendUrl = ref.watch(settingsProvider).backendUrl;
+  return ApiService(baseUrl: backendUrl);
+});
 final downloadServiceProvider = Provider<DownloadService>((ref) => DownloadService());
+
 
 // Extraction State Model
 class ExtractionState {

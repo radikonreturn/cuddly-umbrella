@@ -5,14 +5,14 @@ import '../models/video_info.dart';
 class ApiService {
   final Dio _dio;
 
-  ApiService()
+  ApiService({String? baseUrl})
       : _dio = Dio(
           BaseOptions(
-            // Read from --dart-define=BACKEND_URL or default to localhost
-            baseUrl: const String.fromEnvironment(
-              'BACKEND_URL',
-              defaultValue: 'http://127.0.0.1:8000',
-            ),
+            baseUrl: baseUrl ??
+                const String.fromEnvironment(
+                  'BACKEND_URL',
+                  defaultValue: 'http://127.0.0.1:8000',
+                ),
             connectTimeout: const Duration(seconds: 15),
             receiveTimeout: const Duration(seconds: 15),
             headers: {
@@ -46,7 +46,7 @@ class ApiService {
           e.type == DioExceptionType.connectionError) {
         throw Exception('Sunucuya bağlanılamadı. Lütfen sunucunun çalıştığından emin olun.');
       }
-      
+
       // Parse details from FastAPI exception
       final responseData = e.response?.data;
       if (responseData is Map) {

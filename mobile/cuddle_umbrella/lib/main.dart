@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'screens/main_navigation_screen.dart';
 import 'providers/providers.dart';
+import 'providers/settings_provider.dart';
 
 // Provider to share URL parsed from outside the app
 final sharedUrlProvider = StateProvider<String>((ref) => '');
@@ -79,10 +80,11 @@ class _MyAppState extends ConsumerState<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
     return MaterialApp(
       title: 'Cuddle Umbrella',
       debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system, // Dark mode support
+      themeMode: settings.themeMode,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'home_screen.dart';
 import 'download_queue_screen.dart';
 import 'library_screen.dart';
+import 'settings_screen.dart';
 
 final navigationIndexProvider = StateProvider<int>((ref) => 0);
 
@@ -17,6 +18,7 @@ class MainNavigationScreen extends ConsumerWidget {
       const HomeScreen(),
       const DownloadQueueScreen(),
       const LibraryScreen(),
+      const SettingsScreen(),
     ];
 
     return Scaffold(
@@ -45,8 +47,14 @@ class MainNavigationScreen extends ConsumerWidget {
             selectedIcon: Icon(Icons.video_library),
             label: 'Kütüphane',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Ayarlar',
+          ),
         ],
       ),
     );
   }
 }
+
