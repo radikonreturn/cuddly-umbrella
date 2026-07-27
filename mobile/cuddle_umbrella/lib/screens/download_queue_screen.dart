@@ -47,7 +47,7 @@ class DownloadQueueScreen extends ConsumerWidget {
                     Icon(
                       Icons.cloud_download_outlined,
                       size: 80,
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                      color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -151,15 +151,17 @@ class DownloadQueueScreen extends ConsumerWidget {
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(4),
                                       child: LinearProgressIndicator(
-                                        value: download.progress < 0 ? 0.0 : download.progress,
+                                        value: (download.progress <= 0 || download.progress > 1.0)
+                                            ? null
+                                            : download.progress,
                                         backgroundColor: Colors.grey.shade200,
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    download.progress < 0
-                                        ? '0.0%'
+                                    (download.progress <= 0 || download.progress > 1.0)
+                                        ? 'Hazırlanıyor...'
                                         : '${(download.progress * 100).toStringAsFixed(1)}%',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,

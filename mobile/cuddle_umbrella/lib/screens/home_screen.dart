@@ -30,6 +30,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Paste from clipboard helper
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted) return;
     if (data != null && data.text != null) {
       setState(() {
         _urlController.text = data.text!;
@@ -77,9 +78,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           !next.isLoading &&
           previous?.videoInfo != next.videoInfo) {
         final info = next.videoInfo!;
-        final currentUrl = _urlController.text.trim();
+        final shared = ref.read(sharedUrlProvider);
+        final currentUrl = _urlController.text.trim().isNotEmpty
+            ? _urlController.text.trim()
+            : shared.trim();
 
-        if (!_isYouTubeUrl(currentUrl)) {
+        if (currentUrl.isNotEmpty && !_isYouTubeUrl(currentUrl)) {
           if (info.formats.isNotEmpty) {
             ref
                 .read(downloadQueueProvider.notifier)
@@ -95,6 +99,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             );
             ref.read(navigationIndexProvider.notifier).state = 1;
           } else {
+            ref.read(extractionStateProvider.notifier).reset();
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('İndirilebilir format bulunamadı.')),
             );
@@ -292,7 +297,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     elevation: 0,
                     color: Theme.of(
                       context,
-                    ).colorScheme.primaryContainer.withOpacity(0.4),
+                    ).colorScheme.primaryContainer.withValues(alpha: 0.4),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),

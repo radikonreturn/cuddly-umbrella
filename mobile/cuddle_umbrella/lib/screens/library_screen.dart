@@ -146,7 +146,7 @@ class LibraryScreen extends ConsumerWidget {
                     Icon(
                       Icons.video_library_outlined,
                       size: 80,
-                      color: Theme.of(context).colorScheme.outline.withOpacity(0.5),
+                      color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -220,7 +220,7 @@ class LibraryScreen extends ConsumerWidget {
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.7),
+                                    color: Colors.black.withValues(alpha: 0.7),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(

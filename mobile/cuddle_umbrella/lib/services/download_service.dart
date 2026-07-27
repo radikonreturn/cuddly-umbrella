@@ -18,18 +18,20 @@ class DownloadService {
     _downloader.trackTasks();
   }
 
-  Future<void> startDownload(VideoInfo videoInfo, FormatInfo format, String originalUrl) async {
+  Future<void> startDownload(VideoInfo videoInfo, FormatInfo format, String originalUrl, {String? backendUrl}) async {
     // Sanitize title to prevent OS file name errors
     final sanitizedTitle = videoInfo.title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
     final filename = '$sanitizedTitle.${format.ext}';
 
-    const String backendBaseUrl = String.fromEnvironment(
-      'BACKEND_URL',
-      defaultValue: 'http://10.0.2.2:8000',
-    );
+    final effectiveBackendUrl = (backendUrl != null && backendUrl.trim().isNotEmpty)
+        ? backendUrl.trim().replaceAll(RegExp(r'/$'), '')
+        : const String.fromEnvironment(
+            'BACKEND_URL',
+            defaultValue: 'http://127.0.0.1:8000',
+          ).replaceAll(RegExp(r'/$'), '');
 
     // Build the proxy download URL
-    final downloadUrl = '$backendBaseUrl/api/download?url=${Uri.encodeComponent(originalUrl)}&format_id=${format.formatId}';
+    final downloadUrl = '$effectiveBackendUrl/api/download?url=${Uri.encodeComponent(originalUrl)}&format_id=${format.formatId}';
 
     final task = DownloadTask(
       url: downloadUrl,

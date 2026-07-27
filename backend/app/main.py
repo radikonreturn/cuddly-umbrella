@@ -38,7 +38,8 @@ startup_time = time.time()
 
 allowed_origins = [org.strip() for org in os.getenv("ALLOWED_ORIGINS", "").split(",") if org.strip()]
 if not allowed_origins:
-    allowed_origins = ["http://localhost:3000"]
+    allowed_origins = ["*"]
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,7 +89,23 @@ def _is_direct_http(fmt: dict) -> bool:
 
 
 def _extract_info_sync(url: str) -> dict:
-    opts = {"noplaylist": True, "quiet": True, "no_warnings": True, "extract_flat": False}
+    is_youtube = "youtube.com" in url or "youtu.be" in url
+    opts = {
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        # Suppress JS runtime warning – android_vr client works without it
+        "extractor_args": {"youtube": {"player_client": ["android_vr", "web"]}},
+    }
+    if is_youtube:
+        opts["skip_download"] = True
+        opts["check_formats"] = False
+
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -97,30 +114,28 @@ def _build_formats(raw_formats: list, info: dict) -> list:
     """
     Build the list of FormatInfo to return to the client.
 
-    Strategy (three passes, stop at first non-empty result):
-      1. Progressive direct-HTTP: both video+audio codecs set, proxyable protocol
-      2. Any video+audio (including HLS/DASH): for platforms like X that only have HLS
-      3. Top-level yt-dlp selected URL fallback
+    Strategy (four passes, stop at first non-empty result):
+      1. Progressive direct-HTTP: both video+audio in one stream, proxyable
+      2. Any single-stream video+audio (e.g. HLS for X/Twitter)
+      3. DASH merge: pair best video-only + best audio-only per resolution
+      4. Top-level yt-dlp selected URL fallback
     """
-    def _parse_formats(fmts, require_direct_http: bool) -> list:
-        best: dict[str, FormatInfo] = {}  # quality → best FormatInfo seen so far
+    def _parse_progressive(fmts, require_direct_http: bool) -> list:
+        best: dict[str, FormatInfo] = {}
         for fmt in fmts:
             vcodec = fmt.get("vcodec")
             acodec = fmt.get("acodec")
-            has_video = vcodec is not None and vcodec != "none"
-            has_audio = acodec is not None and acodec != "none"
-
+            has_video = vcodec != "none"
+            has_audio = acodec != "none"
             if not (has_video and has_audio):
                 continue
             if require_direct_http and not _is_direct_http(fmt):
                 continue
-
             h = fmt.get("height")
             w = fmt.get("width")
             res = min(h, w) if (h and w) else (h or w)
             if not res:
                 continue
-
             quality = f"{res}p"
             filesize = fmt.get("filesize") or fmt.get("filesize_approx")
             existing = best.get(quality)
@@ -137,17 +152,108 @@ def _build_formats(raw_formats: list, info: dict) -> list:
                       key=lambda f: int(f.quality[:-1]) if f.quality[:-1].isdigit() else 0,
                       reverse=True)
 
-    # Pass 1 – direct-HTTP progressive
-    result = _parse_formats(raw_formats, require_direct_http=True)
+    def _parse_dash_merge(fmts) -> list:
+        """Build merged video+audio pairs from DASH/separate streams."""
+        # Collect best audio-only format (prefer m4a/mp4a for broadest compatibility)
+        audio_formats = [
+            f for f in fmts
+            if f.get("acodec") not in (None, "none")
+            and f.get("vcodec") in (None, "none")
+            and _is_direct_http(f)
+        ]
+        if not audio_formats:
+            return []
+
+        # Pick the best audio: prefer mp4a (m4a) at ~128k
+        def audio_score(f):
+            abr = f.get("abr") or 0
+            codec = f.get("acodec") or ""
+            prefer_mp4a = 1 if "mp4a" in codec else 0
+            return (prefer_mp4a, abr)
+
+        best_audio = max(audio_formats, key=audio_score)
+        best_audio_id = best_audio.get("format_id")
+        best_audio_size = best_audio.get("filesize") or best_audio.get("filesize_approx") or 0
+
+        # Collect video-only formats
+        video_formats = [
+            f for f in fmts
+            if f.get("vcodec") not in (None, "none")
+            and f.get("acodec") in (None, "none")
+            and _is_direct_http(f)
+        ]
+        if not video_formats:
+            return []
+
+        # Best video-only per resolution – prefer avc1 (H.264) for device compatibility
+        best_per_res: dict[str, dict] = {}
+        for f in video_formats:
+            h = f.get("height")
+            w = f.get("width")
+            res = min(h, w) if (h and w) else (h or w)
+            if not res:
+                continue
+            quality = f"{res}p"
+            vcodec = f.get("vcodec") or ""
+            existing = best_per_res.get(quality)
+            if not existing:
+                best_per_res[quality] = f
+            else:
+                # Prefer H.264 (avc1) > others; then by bitrate
+                cur_is_avc = "avc" in (existing.get("vcodec") or "")
+                new_is_avc = "avc" in vcodec
+                cur_tbr = existing.get("tbr") or 0
+                new_tbr = f.get("tbr") or 0
+                if (not cur_is_avc and new_is_avc) or (cur_is_avc == new_is_avc and new_tbr > cur_tbr):
+                    best_per_res[quality] = f
+
+        result = []
+        for quality, vfmt in best_per_res.items():
+            vid_id = vfmt.get("format_id")
+            vid_size = vfmt.get("filesize") or vfmt.get("filesize_approx") or 0
+            combined_size = (vid_size + best_audio_size) or None
+            ext = vfmt.get("ext") or "mp4"
+            # Merged format uses '+' separator understood by yt-dlp
+            result.append(FormatInfo(
+                format_id=f"{vid_id}+{best_audio_id}",
+                quality=quality,
+                ext="mp4",   # ffmpeg will mux to mp4
+                filesize_approx=combined_size,
+                has_audio=True,
+                has_video=True,
+            ))
+
+        return sorted(result,
+                      key=lambda f: int(f.quality[:-1]) if f.quality[:-1].isdigit() else 0,
+                      reverse=True)
+
+    # Pass 1 – direct-HTTP progressive (single file with both streams)
+    prog_direct = _parse_progressive(raw_formats, require_direct_http=True)
+
+    # Pass 2 – any single-stream with both codecs (HLS etc.)
+    prog_other = _parse_progressive(raw_formats, require_direct_http=False)
+
+    # Pass 3 – DASH merge (separate video + audio → merged via yt-dlp subprocess)
+    dash_merged = _parse_dash_merge(raw_formats)
+
+    # Combine formats from different passes, prioritizing progressive over DASH-merged formats.
+    formats_by_quality = {}
+    for f in dash_merged:
+        formats_by_quality[f.quality] = f
+    for f in prog_other:
+        formats_by_quality[f.quality] = f
+    for f in prog_direct:
+        formats_by_quality[f.quality] = f
+
+    result = sorted(
+        formats_by_quality.values(),
+        key=lambda f: int(f.quality[:-1]) if f.quality[:-1].isdigit() else 0,
+        reverse=True
+    )
     if result:
         return result
 
-    # Pass 2 – any protocol (HLS, DASH, …)
-    result = _parse_formats(raw_formats, require_direct_http=False)
-    if result:
-        return result
-
-    # Pass 3 – top-level URL that yt-dlp selected
+    # Pass 4 – top-level URL that yt-dlp selected as fallback
     url = info.get("url", "")
     if url.startswith(("http://", "https://")):
         h = info.get("height")
@@ -243,16 +349,40 @@ async def download_video(
 ):
     validate_video_url(url)
 
+    format_id = format_id.replace(" ", "+")
+
     try:
         info = await to_thread.run_sync(_extract_info_sync, url)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Video bilgisi alınamadı: {str(e)}")
 
     # Locate the selected format
-    selected_format = next(
-        (f for f in info.get("formats", []) if f.get("format_id") == format_id),
-        None,
-    )
+    is_merged = False
+    selected_format = None
+    if "+" in format_id:
+        parts = format_id.split("+")
+        if len(parts) == 2:
+            v_id, a_id = parts[0], parts[1]
+            all_fmts = info.get("formats", [])
+            v_fmt = next((f for f in all_fmts if f.get("format_id") == v_id), None)
+            a_fmt = next((f for f in all_fmts if f.get("format_id") == a_id), None)
+            if v_fmt and a_fmt:
+                is_merged = True
+                v_size = v_fmt.get("filesize") or v_fmt.get("filesize_approx") or 0
+                a_size = a_fmt.get("filesize") or a_fmt.get("filesize_approx") or 0
+                selected_format = {
+                    "format_id": format_id,
+                    "ext": "mp4",
+                    "url": v_fmt.get("url", ""),
+                    "protocol": "merged",
+                    "filesize": (v_size + a_size) or None,
+                }
+
+    if not selected_format:
+        selected_format = next(
+            (f for f in info.get("formats", []) if f.get("format_id") == format_id),
+            None,
+        )
     if not selected_format and info.get("format_id") == format_id:
         selected_format = info
     if not selected_format:
@@ -269,8 +399,9 @@ async def download_video(
     content_disposition = f"attachment; filename*=UTF-8''{encoded_filename}"
 
     # ── Path A: direct HTTP stream → proxy with httpx ──────────────────────
-    if _is_direct_http(selected_format) and video_url.startswith(("http://", "https://")):
-        download_headers = info.get("http_headers", {})
+    if not is_merged and _is_direct_http(selected_format) and video_url.startswith(("http://", "https://")):
+        raw_headers = info.get("http_headers", {})
+        download_headers = {k: v for k, v in raw_headers.items() if k.lower() not in ("host", "content-length")}
 
         async def stream_direct():
             timeout = httpx.Timeout(10.0, connect=30.0, read=300.0)
@@ -284,9 +415,9 @@ async def download_video(
                 await client.aclose()
 
         resp_headers = {"Content-Disposition": content_disposition, "Accept-Ranges": "bytes"}
-        filesize = selected_format.get("filesize") or selected_format.get("filesize_approx")
-        if filesize:
-            resp_headers["Content-Length"] = str(filesize)
+        exact_filesize = selected_format.get("filesize")
+        if exact_filesize:
+            resp_headers["Content-Length"] = str(exact_filesize)
 
         return StreamingResponse(stream_direct(), media_type=get_mime_type(ext), headers=resp_headers)
 
@@ -296,6 +427,7 @@ async def download_video(
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "yt_dlp",
             "--no-playlist", "--quiet",
+            "--extractor-args", "youtube:player_client=android_vr,web",
             "-f", format_id,
             "-o", "-",      # write video bytes to stdout
             url,

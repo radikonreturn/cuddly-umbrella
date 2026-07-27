@@ -180,7 +180,8 @@ class DownloadQueueNotifier extends StateNotifier<List<ActiveDownload>> {
   }
 
   Future<void> startDownload(VideoInfo videoInfo, FormatInfo format, String originalUrl) async {
-    await _ref.read(downloadServiceProvider).startDownload(videoInfo, format, originalUrl);
+    final backendUrl = _ref.read(settingsProvider).backendUrl;
+    await _ref.read(downloadServiceProvider).startDownload(videoInfo, format, originalUrl, backendUrl: backendUrl);
   }
 
   Future<void> pause(String taskId) async {
