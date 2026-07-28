@@ -38,8 +38,8 @@ dependencies:
   # HTTP Client
   dio: 5.7.0
 
-  # Sharing intent integration (sharing link from other apps)
-  receive_sharing_intent: 1.9.0
+  # Sharing intent integration (receiving shared text/link from other apps)
+  share_handler: ^0.0.25
 
   # Share sheet integration
   share_plus: 13.1.0

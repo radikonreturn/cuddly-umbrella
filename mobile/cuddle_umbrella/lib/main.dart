@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:share_handler/share_handler.dart';
 import 'screens/main_navigation_screen.dart';
 import 'providers/providers.dart';
 import 'providers/settings_provider.dart';
@@ -37,23 +37,27 @@ class _MyAppState extends ConsumerState<MyApp> {
     }
   }
 
-  void _initSharingIntent() {
-    // For sharing or receiving links when app is in memory
-    _intentDataStreamSubscription = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
-      if (value.isNotEmpty) {
-        final sharedFile = value.first;
-        _handleSharedUrl(sharedFile.path);
+  Future<void> _initSharingIntent() async {
+    // TODO: For iOS ShareExtension target setup, configure App Group and Podfile entry as per share_handler iOS docs when building on macOS.
+    final handler = ShareHandlerPlatform.instance;
+
+    // For sharing or receiving links when app is closed / launched initially
+    final initialMedia = await handler.getInitialSharedMedia();
+    if (initialMedia != null) {
+      final content = initialMedia.content;
+      if (content != null && content.isNotEmpty) {
+        _handleSharedUrl(content);
+      }
+    }
+
+    // For sharing or receiving links while app is running in memory
+    _intentDataStreamSubscription = handler.sharedMediaStream.listen((SharedMedia media) {
+      final content = media.content;
+      if (content != null && content.isNotEmpty) {
+        _handleSharedUrl(content);
       }
     }, onError: (err) {
-      debugPrint("getMediaStream error: $err");
-    });
-
-    // For sharing or receiving links when app is closed
-    ReceiveSharingIntent.instance.getInitialMedia().then((value) {
-      if (value.isNotEmpty) {
-        final sharedFile = value.first;
-        _handleSharedUrl(sharedFile.path);
-      }
+      debugPrint("sharedMediaStream error: $err");
     });
   }
 
